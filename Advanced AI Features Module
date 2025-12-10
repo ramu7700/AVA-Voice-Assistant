@@ -1,0 +1,360 @@
+"""
+Advanced AI Features for AVA
+Includes GPT integration, sentiment analysis, and more
+"""
+
+import openai
+import json
+from textblob import TextBlob
+import random
+
+class AdvancedAI:
+    """Advanced AI capabilities for AVA"""
+    
+    def __init__(self, openai_api_key=None):
+        """Initialize advanced AI features"""
+        self.openai_api_key = openai_api_key
+        if openai_api_key:
+            openai.api_key = openai_api_key
+        
+        self.conversation_history = []
+        self.personality_modes = {
+            "professional": {
+                "system_prompt": "You are AVA, a professional and efficient AI assistant. Provide clear, concise, and formal responses.",
+                "style": "formal"
+            },
+            "friendly": {
+                "system_prompt": "You are AVA, a friendly and warm AI assistant. Be conversational, helpful, and approachable.",
+                "style": "casual"
+            },
+            "funny": {
+                "system_prompt": "You are AVA, a witty and humorous AI assistant. Make jokes, use puns, and keep things light-hearted while being helpful.",
+                "style": "humorous"
+            }
+        }
+        self.current_personality = "friendly"
+    
+    # ========== GPT INTEGRATION ==========
+    
+    def chat_with_gpt(self, user_message, personality=None):
+        """Have a conversation with GPT"""
+        if not self.openai_api_key:
+            return "OpenAI API key not configured. Please add your API key to use GPT features."
+        
+        try:
+            personality = personality or self.current_personality
+            system_prompt = self.personality_modes[personality]["system_prompt"]
+            
+            # Add to conversation history
+            self.conversation_history.append({
+                "role": "user",
+                "content": user_message
+            })
+            
+            # Keep last 10 messages for context
+            messages = [{"role": "system", "content": system_prompt}]
+            messages.extend(self.conversation_history[-10:])
+            
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=messages,
+                max_tokens=150,
+                temperature=0.7
+            )
+            
+            assistant_message = response.choices[0].message.content
+            
+            self.conversation_history.append({
+                "role": "assistant",
+                "content": assistant_message
+            })
+            
+            return assistant_message
+            
+        except Exception as e:
+            return f"GPT service error: {str(e)}"
+    
+    def set_personality(self, personality):
+        """Change AVA's personality mode"""
+        if personality in self.personality_modes:
+            self.current_personality = personality
+            return f"Personality changed to {personality} mode"
+        else:
+            return f"Unknown personality mode. Available: {', '.join(self.personality_modes.keys())}"
+    
+    # ========== SENTIMENT ANALYSIS ==========
+    
+    def analyze_sentiment(self, text):
+        """Analyze sentiment of text"""
+        blob = TextBlob(text)
+        polarity = blob.sentiment.polarity
+        subjectivity = blob.sentiment.subjectivity
+        
+        if polarity > 0.3:
+            sentiment = "positive"
+        elif polarity < -0.3:
+            sentiment = "negative"
+        else:
+            sentiment = "neutral"
+        
+        return {
+            "sentiment": sentiment,
+            "polarity": polarity,
+            "subjectivity": subjectivity,
+            "confidence": abs(polarity)
+        }
+    
+    def respond_to_emotion(self, user_text):
+        """Respond appropriately based on user's emotion"""
+        sentiment = self.analyze_sentiment(user_text)
+        
+        if sentiment["sentiment"] == "negative":
+            responses = [
+                "I sense you might be feeling down. Is there anything I can help with?",
+                "I'm here to help. What's troubling you?",
+                "It sounds like you're having a tough time. How can I assist you?"
+            ]
+            return random.choice(responses)
+        
+        elif sentiment["sentiment"] == "positive":
+            responses = [
+                "I'm glad you're feeling positive! How can I help you today?",
+                "That's great to hear! What would you like to do?",
+                "Your positive energy is wonderful! What can I do for you?"
+            ]
+            return random.choice(responses)
+        
+        else:
+            return "How can I assist you today?"
+    
+    # ========== CONTEXT UNDERSTANDING ==========
+    
+    def extract_entities(self, text):
+        """Extract entities from text (names, dates, locations)"""
+        # Simple entity extraction
+        blob = TextBlob(text)
+        entities = {
+            "nouns": list(blob.noun_phrases),
+            "verbs": [],
+            "adjectives": []
+        }
+        
+        for word, tag in blob.tags:
+            if tag.startswith('VB'):
+                entities["verbs"].append(word)
+            elif tag.startswith('JJ'):
+                entities["adjectives"].append(word)
+        
+        return entities
+    
+    def understand_context(self, current_query, previous_queries=None):
+        """Understand context from conversation history"""
+        if not previous_queries:
+            previous_queries = [msg["content"] for msg in self.conversation_history[-3:] 
+                              if msg["role"] == "user"]
+        
+        # Extract entities from current and previous queries
+        current_entities = self.extract_entities(current_query)
+        
+        context = {
+            "current_topic": current_entities["nouns"][:3] if current_entities["nouns"] else [],
+            "action_intent": current_entities["verbs"][:2] if current_entities["verbs"] else [],
+            "previous_topics": []
+        }
+        
+        for query in previous_queries:
+            entities = self.extract_entities(query)
+            if entities["nouns"]:
+                context["previous_topics"].extend(entities["nouns"][:2])
+        
+        return context
+    
+    # ========== SMART SUGGESTIONS ==========
+    
+    def generate_suggestions(self, user_query):
+        """Generate smart suggestions based on query"""
+        query_lower = user_query.lower()
+        suggestions = []
+        
+        if "weather" in query_lower:
+            suggestions = [
+                "Get weather forecast for tomorrow",
+                "Weather for next week",
+                "Temperature trends"
+            ]
+        
+        elif "music" in query_lower or "play" in query_lower:
+            suggestions = [
+                "Play my favorite playlist",
+                "Search for new music",
+                "Play relaxing music"
+            ]
+        
+        elif "news" in query_lower:
+            suggestions = [
+                "Technology news",
+                "Sports updates",
+                "Local news"
+            ]
+        
+        elif "reminder" in query_lower or "todo" in query_lower:
+            suggestions = [
+                "Show all reminders",
+                "Add new task",
+                "Mark task as complete"
+            ]
+        
+        return suggestions
+    
+    # ========== LEARNING & MEMORY ==========
+    
+    def learn_preference(self, category, item):
+        """Learn user preferences"""
+        preferences_file = "user_learning.json"
+        
+        try:
+            with open(preferences_file, 'r') as f:
+                learning_data = json.load(f)
+        except:
+            learning_data = {}
+        
+        if category not in learning_data:
+            learning_data[category] = []
+        
+        if item not in learning_data[category]:
+            learning_data[category].append(item)
+        
+        with open(preferences_file, 'w') as f:
+            json.dump(learning_data, f, indent=4)
+        
+        return f"Learned: {category} -> {item}"
+    
+    def get_learned_preferences(self, category=None):
+        """Get learned preferences"""
+        try:
+            with open("user_learning.json", 'r') as f:
+                learning_data = json.load(f)
+            
+            if category:
+                return learning_data.get(category, [])
+            return learning_data
+        except:
+            return {} if not category else []
+    
+    def personalized_recommendation(self, category):
+        """Give personalized recommendations"""
+        preferences = self.get_learned_preferences(category)
+        
+        if not preferences:
+            return f"I don't have enough data about your {category} preferences yet. Let me know what you like!"
+        
+        return f"Based on what I know, you might like: {', '.join(preferences[:3])}"
+    
+    # ========== NATURAL LANGUAGE UNDERSTANDING ==========
+    
+    def extract_intent(self, query):
+        """Extract intent from user query"""
+        query_lower = query.lower()
+        
+        intents = {
+            "search": ["search", "find", "look for", "google"],
+            "play": ["play", "listen", "watch"],
+            "open": ["open", "launch", "start"],
+            "weather": ["weather", "temperature", "forecast"],
+            "time": ["time", "clock"],
+            "date": ["date", "day", "today"],
+            "reminder": ["remind", "reminder", "remember"],
+            "todo": ["todo", "task", "list"],
+            "joke": ["joke", "funny", "laugh"],
+            "news": ["news", "headlines", "update"],
+            "translate": ["translate", "translation"],
+            "calculate": ["calculate", "math", "compute"]
+        }
+        
+        for intent, keywords in intents.items():
+            if any(keyword in query_lower for keyword in keywords):
+                return intent
+        
+        return "unknown"
+    
+    def extract_parameters(self, query, intent):
+        """Extract parameters from query based on intent"""
+        parameters = {}
+        
+        if intent == "search":
+            # Extract search query
+            for keyword in ["search", "find", "look for", "google"]:
+                if keyword in query.lower():
+                    parameters["query"] = query.lower().replace(keyword, "").strip()
+                    break
+        
+        elif intent == "play":
+            # Extract song/video name
+            parameters["media"] = query.lower().replace("play", "").strip()
+        
+        elif intent == "open":
+            # Extract app name
+            parameters["app"] = query.lower().replace("open", "").strip()
+        
+        elif intent == "reminder" or intent == "todo":
+            # Extract task description
+            for keyword in ["remind", "reminder", "todo", "task", "add"]:
+                query = query.lower().replace(keyword, "")
+            parameters["description"] = query.strip()
+        
+        return parameters
+    
+    # ========== CONVERSATIONAL AI ==========
+    
+    def generate_natural_response(self, intent, parameters):
+        """Generate natural language response"""
+        responses = {
+            "search": [
+                f"Let me search for {parameters.get('query', 'that')} for you",
+                f"Searching for {parameters.get('query', 'that')} right away",
+                f"I'll find information about {parameters.get('query', 'that')}"
+            ],
+            "play": [
+                f"Playing {parameters.get('media', 'that')} now",
+                f"Sure, let me play {parameters.get('media', 'that')}",
+                f"Starting {parameters.get('media', 'that')}"
+            ],
+            "open": [
+                f"Opening {parameters.get('app', 'that')} for you",
+                f"Launching {parameters.get('app', 'that')}",
+                f"Starting {parameters.get('app', 'that')} application"
+            ]
+        }
+        
+        if intent in responses:
+            return random.choice(responses[intent])
+        
+        return "I'll help you with that"
+
+
+# ========== USAGE EXAMPLE ==========
+
+if __name__ == "__main__":
+    # Initialize
+    ai = AdvancedAI(openai_api_key="your-api-key")
+    
+    # Test sentiment analysis
+    text = "I'm feeling really happy today!"
+    sentiment = ai.analyze_sentiment(text)
+    print(f"Sentiment: {sentiment}")
+    
+    # Test entity extraction
+    query = "Play some relaxing music from Spotify"
+    entities = ai.extract_entities(query)
+    print(f"Entities: {entities}")
+    
+    # Test intent extraction
+    intent = ai.extract_intent(query)
+    params = ai.extract_parameters(query, intent)
+    print(f"Intent: {intent}, Parameters: {params}")
+    
+    # Test learning
+    ai.learn_preference("music", "Imagine Dragons")
+    ai.learn_preference("music", "Coldplay")
+    recommendation = ai.personalized_recommendation("music")
+    print(recommendation)
