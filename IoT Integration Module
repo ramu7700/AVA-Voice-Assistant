@@ -1,0 +1,293 @@
+"""
+IoT Integration Module for AVA
+Supports MQTT, Firebase, and ESP8266/ESP32
+"""
+
+import paho.mqtt.client as mqtt
+import json
+import time
+
+class IoTManager:
+    """Manage IoT devices and home automation"""
+    
+    def __init__(self):
+        self.mqtt_client = None
+        self.devices = {}
+        self.mqtt_broker = "broker.hivemq.com"  # Public broker
+        self.mqtt_port = 1883
+        
+    def connect_mqtt(self, broker=None, port=None):
+        """Connect to MQTT broker"""
+        if broker:
+            self.mqtt_broker = broker
+        if port:
+            self.mqtt_port = port
+            
+        self.mqtt_client = mqtt.Client("AVA_Assistant")
+        self.mqtt_client.on_connect = self.on_connect
+        self.mqtt_client.on_message = self.on_message
+        
+        try:
+            self.mqtt_client.connect(self.mqtt_broker, self.mqtt_port, 60)
+            self.mqtt_client.loop_start()
+            print(f"✅ Connected to MQTT broker: {self.mqtt_broker}")
+            return True
+        except Exception as e:
+            print(f"❌ MQTT connection failed: {e}")
+            return False
+    
+    def on_connect(self, client, userdata, flags, rc):
+        """Callback when connected to MQTT"""
+        if rc == 0:
+            print("Connected to MQTT Broker!")
+            # Subscribe to device topics
+            client.subscribe("ava/devices/#")
+        else:
+            print(f"Failed to connect, return code {rc}")
+    
+    def on_message(self, client, userdata, msg):
+        """Callback when message received"""
+        topic = msg.topic
+        payload = msg.payload.decode()
+        print(f"Received: {topic} - {payload}")
+        
+        # Update device status
+        device_id = topic.split('/')[-1]
+        try:
+            data = json.loads(payload)
+            self.devices[device_id] = data
+        except:
+            self.devices[device_id] = {"status": payload}
+    
+    def publish_command(self, device_id, command, value=None):
+        """Send command to IoT device"""
+        if not self.mqtt_client:
+            print("MQTT not connected")
+            return False
+        
+        topic = f"ava/devices/{device_id}/command"
+        payload = {
+            "command": command,
+            "value": value,
+            "timestamp": time.time()
+        }
+        
+        self.mqtt_client.publish(topic, json.dumps(payload))
+        print(f"✅ Sent command to {device_id}: {command}")
+        return True
+    
+    # ========== DEVICE CONTROLS ==========
+    
+    def control_light(self, device_id, state):
+        """Control smart light (ON/OFF)"""
+        command = "on" if state else "off"
+        return self.publish_command(device_id, command)
+    
+    def set_brightness(self, device_id, brightness):
+        """Set light brightness (0-100)"""
+        return self.publish_command(device_id, "brightness", brightness)
+    
+    def control_fan(self, device_id, state, speed=None):
+        """Control smart fan"""
+        if speed:
+            self.publish_command(device_id, "speed", speed)
+        command = "on" if state else "off"
+        return self.publish_command(device_id, command)
+    
+    def read_sensor(self, device_id):
+        """Read sensor data"""
+        if device_id in self.devices:
+            return self.devices[device_id]
+        else:
+            # Request sensor data
+            self.publish_command(device_id, "read")
+            time.sleep(1)  # Wait for response
+            return self.devices.get(device_id, {})
+    
+    def get_temperature(self, sensor_id):
+        """Get temperature from sensor"""
+        data = self.read_sensor(sensor_id)
+        return data.get("temperature", None)
+    
+    def get_humidity(self, sensor_id):
+        """Get humidity from sensor"""
+        data = self.read_sensor(sensor_id)
+        return data.get("humidity", None)
+    
+    def list_devices(self):
+        """List all connected devices"""
+        return list(self.devices.keys())
+    
+    def disconnect(self):
+        """Disconnect from MQTT"""
+        if self.mqtt_client:
+            self.mqtt_client.loop_stop()
+            self.mqtt_client.disconnect()
+
+
+# ========== ESP8266/ESP32 Example Code ==========
+"""
+Arduino/ESP32 Code to integrate with AVA:
+
+#include <WiFi.h>
+#include <PubSubClient.h>
+
+// WiFi credentials
+const char* ssid = "YOUR_WIFI_SSID";
+const char* password = "YOUR_WIFI_PASSWORD";
+
+// MQTT Broker
+const char* mqtt_server = "broker.hivemq.com";
+const int mqtt_port = 1883;
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+
+// Device configuration
+const char* device_id = "light_01";
+const int LED_PIN = 2;
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(LED_PIN, OUTPUT);
+  
+  // Connect to WiFi
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("WiFi connected");
+  
+  // Setup MQTT
+  client.setServer(mqtt_server, mqtt_port);
+  client.setCallback(callback);
+}
+
+void callback(char* topic, byte* payload, unsigned int length) {
+  String message = "";
+  for (int i = 0; i < length; i++) {
+    message += (char)payload[i];
+  }
+  
+  // Parse JSON command
+  if (message.indexOf("on") >= 0) {
+    digitalWrite(LED_PIN, HIGH);
+    publishStatus("on");
+  } 
+  else if (message.indexOf("off") >= 0) {
+    digitalWrite(LED_PIN, LOW);
+    publishStatus("off");
+  }
+}
+
+void publishStatus(String status) {
+  String topic = "ava/devices/" + String(device_id) + "/status";
+  client.publish(topic.c_str(), status.c_str());
+}
+
+void reconnect() {
+  while (!client.connected()) {
+    if (client.connect(device_id)) {
+      String topic = "ava/devices/" + String(device_id) + "/command";
+      client.subscribe(topic.c_str());
+    } else {
+      delay(5000);
+    }
+  }
+}
+
+void loop() {
+  if (!client.connected()) {
+    reconnect();
+  }
+  client.loop();
+}
+"""
+
+
+# ========== Firebase Integration ==========
+
+class FirebaseManager:
+    """Manage Firebase Realtime Database"""
+    
+    def __init__(self, credentials_path=None):
+        """Initialize Firebase"""
+        try:
+            import firebase_admin
+            from firebase_admin import credentials, db
+            
+            if credentials_path:
+                cred = credentials.Certificate(credentials_path)
+                firebase_admin.initialize_app(cred, {
+                    'databaseURL': 'https://your-project.firebaseio.com'
+                })
+            
+            self.db = db
+            print("✅ Firebase initialized")
+        except Exception as e:
+            print(f"❌ Firebase initialization failed: {e}")
+            self.db = None
+    
+    def write_data(self, path, data):
+        """Write data to Firebase"""
+        if not self.db:
+            return False
+        try:
+            ref = self.db.reference(path)
+            ref.set(data)
+            return True
+        except Exception as e:
+            print(f"Error writing to Firebase: {e}")
+            return False
+    
+    def read_data(self, path):
+        """Read data from Firebase"""
+        if not self.db:
+            return None
+        try:
+            ref = self.db.reference(path)
+            return ref.get()
+        except Exception as e:
+            print(f"Error reading from Firebase: {e}")
+            return None
+    
+    def control_device(self, device_id, state):
+        """Control device via Firebase"""
+        path = f"devices/{device_id}"
+        data = {
+            "state": state,
+            "timestamp": time.time()
+        }
+        return self.write_data(path, data)
+
+
+# ========== Usage Example ==========
+
+if __name__ == "__main__":
+    # Initialize IoT Manager
+    iot = IoTManager()
+    
+    # Connect to MQTT
+    if iot.connect_mqtt():
+        # Control devices
+        iot.control_light("light_01", True)  # Turn on light
+        time.sleep(2)
+        iot.set_brightness("light_01", 75)   # Set brightness
+        time.sleep(2)
+        iot.control_light("light_01", False) # Turn off
+        
+        # Read sensor
+        temp = iot.get_temperature("temp_sensor_01")
+        print(f"Temperature: {temp}°C")
+        
+        # List devices
+        devices = iot.list_devices()
+        print(f"Connected devices: {devices}")
+        
+        # Keep running
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            iot.disconnect()
